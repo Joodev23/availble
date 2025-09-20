@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nocturne Executor - Login</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="logo-section">
+                <img src="https://github.com/Joodev65.png" alt="Nocturne Executor Logo" class="logo">
+                <h1>Nocturne Executor</h1>
+                <p>Developer: 7ooModdss</p>
+            </div>
+            
+            <form class="login-form" id="loginForm">
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <button type="submit" class="login-btn">
+                    <span class="btn-text">Login</span>
+                    <div class="btn-loader hidden">
+                        <div class="spinner"></div>
+                    </div>
+                </button>
+            </form>
+            
+            <div class="footer">
+                <p>Powered by Nocturne Technology</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="errorModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Akses Ditolak</h3>
+                <span class="close-modal" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Anda harus membeli akses untuk menggunakan aplikasi ini</p>
+            </div>
+            <div class="modal-footer">
+                <a href="https://t.me/Joocode" target="_blank" class="telegram-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0C5.374 0 0 5.373 0 12s5.374 12 12 12 12-5.373 12-12S18.626 0 12 0zm5.568 8.16c-.169 1.858-.896 6.728-.896 6.728-.896 6.728-1.292 0.888-1.292 0.888-.3.257-.634.4-1.004.4-.437 0-.833-.174-1.125-.482 0 0-3.258-2.606-3.258-2.606-.109-.089-.18-.218-.18-.359 0-.307.26-.556.58-.556.14 0 .271.05.373.144 0 0 2.375 1.904 2.375 1.904s.942-.756 2.132-1.713c.188-.151.453-.24.734-.24.548 0 .998.444 1.011.995-.001.037-.007.073-.016.108z"/>
+                    </svg>
+                    Contact Telegram
+                </a>
+                <button class="close-btn" onclick="closeModal()">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/login.js"></script>
+</body>
+</html>
