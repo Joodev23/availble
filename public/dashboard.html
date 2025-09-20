@@ -87,26 +87,27 @@
         <div class="page active" id="mainPage">
             <div class="page-header">
                 <h2>WhatsApp Bugs Tool</h2>
-                <p>Serang Nomor WhatsApp Untuk Membuat Efek Seperti Crash, Delay, Force Close Dan Blank</p>
+                <p>Serang Nomor WhatsApp Untuk Membuat Efek Seperti Crash, Delay, Force Close Dan Blank Untuk Target</p>
             </div>
             
-            <div class="content-grid">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Connection Status</h3>
-                    </div>
-                    <div class="card-body">
-                        <div class="status-indicator" id="connectionStatus">
-                            <div class="status-dot offline"></div>
-                            <span>Disconnected</span>
-                        </div>
-                        <button class="btn btn-primary" id="connectBtn">Connect WhatsApp</button>
-                        <div id="qrCodeContainer" class="qr-container hidden">
-                            <p>Scan Code dengan WhatsApp Anda:</p>
-                            <img id="qrCodeImg" src="" alt="QR Code">
-                        </div>
-                    </div>
-                </div>
+<div class="content-grid">
+  <div class="card">
+    <div class="card-header"><h3>Connection Status</h3></div>
+    <div class="card-body">
+      <div class="status-indicator" id="connectionStatus">
+        <div class="status-dot offline"></div>
+        <span>Disconnected</span>
+      </div>
+      <button class="btn btn-primary" id="connectBtn">Connect WhatsApp</button>
+
+      <div id="codeContainer" class="code-box hidden">
+        <p>Kode pairing Anda:</p>
+        <div id="pairingCodeDisplay" class="pairing-code">------</div>
+        <small>Masukkan Kode Ke WhatsApp Anda</small>
+      </div>
+    </div>
+  </div>
+</div>
                 
                 <div class="card">
                     <div class="card-header">
@@ -119,7 +120,7 @@
                         </div>
                         
                         <div class="input-group">
-                            <label for="messageVersion">Pilih Versi</label>
+                            <label for="messageVersion">Pilih Type</label>
                             <select id="messageVersion">
                                 <option value="v1">Crash - Crash No Click</option>
                                 <option value="v2">Delay - Delay Maker</option>
@@ -127,10 +128,7 @@
                             </select>
                         </div>
                         
-                        <div class="input-group">
-                            <label for="customMessage">X</label>
-                            <textarea id="customMessage" placeholder=""></textarea>
-                        </div>
+              
                         
                         <button class="btn btn-success" id="sendBtn">Send Bugs</button>
                         
