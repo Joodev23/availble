@@ -1,3 +1,22 @@
+document.getElementById('connectBtn').addEventListener('click', async () => {
+  const phone = prompt('Masukkan nomor WhatsApp (62xx):');
+  if (!phone || phone.length < 10) return alert('Nomor minimal 10 digit, format 62xxx');
+
+  const raw = await fetch('/api/whatsapp/connect', {
+    method : 'POST',
+    headers: {'Content-Type':'application/json'},
+    body   : JSON.stringify({phoneNumber: phone.replace(/\D/g,'')})
+  });
+  const res = await raw.json();
+
+  if (res.success && res.pairingCode) {
+    document.getElementById('pairingCodeDisplay').textContent = res.pairingCode;
+    document.getElementById('codeContainer').classList.remove('hidden');
+  } else {
+    alert(res.message || 'Gagal membuat kode');
+  }
+});
+
 document.addEventListener('DOMContentLoaded', function() {
     initializeWhatsApp();
     checkConnectionStatus();    
