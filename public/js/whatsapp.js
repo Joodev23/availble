@@ -1,22 +1,3 @@
-document.getElementById('connectBtn').addEventListener('click', async () => {
-  const phone = prompt('Masukkan nomor WhatsApp (62xx):');
-  if (!phone || phone.length < 10) return alert('Nomor minimal 10 digit, format 62xxx');
-
-  const raw = await fetch('/api/whatsapp/connect', {
-    method : 'POST',
-    headers: {'Content-Type':'application/json'},
-    body   : JSON.stringify({phoneNumber: phone.replace(/\D/g,'')})
-  });
-  const res = await raw.json();
-
-  if (res.success && res.pairingCode) {
-    document.getElementById('pairingCodeDisplay').textContent = res.pairingCode;
-    document.getElementById('codeContainer').classList.remove('hidden');
-  } else {
-    alert(res.message || 'Gagal membuat kode');
-  }
-});
-
 document.addEventListener('DOMContentLoaded', function() {
     initializeWhatsApp();
     checkConnectionStatus();    
@@ -27,6 +8,9 @@ function initializeWhatsApp() {
     const connectBtn = document.getElementById('connectBtn');
     const sendBtn = document.getElementById('sendBtn');
     
+    connectBtn.removeEventListener('click', requestPairingCode);
+    sendBtn.removeEventListener('click', sendWhatsAppMessage);
+    
     connectBtn.addEventListener('click', requestPairingCode);
     sendBtn.addEventListener('click', sendWhatsAppMessage);
     
@@ -35,15 +19,28 @@ function initializeWhatsApp() {
 }
 
 async function requestPairingCode() {
-    const phoneNumber = prompt('Masukkan nomor WhatsApp Anda untuk pairing (contoh: 628123456789):');
+ 
+    let phoneNumber = prompt('Masukkan nomor WhatsApp Anda (contoh: 628123456789 atau 08123456789):');
     
     if (!phoneNumber) {
         return;
     }
     
-    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    let cleanNumber = phoneNumber.replace(/\D/g, '');
+    
+    if (cleanNumber.startsWith('08')) {
+        cleanNumber = '62' + cleanNumber.substring(1);
+    } else if (cleanNumber.startsWith('8') && cleanNumber.length >= 9) {
+        cleanNumber = '62' + cleanNumber;
+    }
+    
     if (cleanNumber.length < 10 || cleanNumber.length > 15) {
-        showNotification('Format nomor telepon tidak valid', 'error');
+        showNotification('Format nomor tidak valid. Gunakan format: 628123456789', 'error');
+        return;
+    }
+    
+    if (!cleanNumber.startsWith('62')) {
+        showNotification('Nomor harus diawali dengan 62 (kode negara Indonesia)', 'error');
         return;
     }
     
@@ -53,140 +50,165 @@ async function requestPairingCode() {
     try {
         connectBtn.textContent = 'Generating Code...';
         connectBtn.disabled = true;
+        showLoading();
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);  
         
         const response = await fetch('/api/whatsapp/connect', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ phoneNumber: cleanNumber })
+            body: JSON.stringify({ phoneNumber: cleanNumber }),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
         
         const result = await response.json();
         
-        if (result.success) {
+        if (result.success && result.pairingCode) {
             showPairingCode(result.pairingCode, cleanNumber);
-            showNotification('Kode pairing berhasil dibuat! Masukkan kode ke WhatsApp Anda.', 'success');
+            showNotification('Kode pairing berhasil dibuat! Masukkan kode ke WhatsApp Anda dalam 2 menit.', 'success');
+            
+            setTimeout(() => {
+                hidePairingCode();
+                showNotification('Kode pairing expired. Request kode baru jika diperlukan.', 'warning');
+            }, 120000);
         } else {
-            showNotification(result.message || 'Gagal membuat kode pairing', 'error');
+            throw new Error(result.message || 'Gagal membuat kode pairing');
         }
     } catch (error) {
         console.error('Pairing code error:', error);
-        showNotification('Koneksi gagal. Periksa internet Anda.', 'error');
+        
+        if (error.name === 'AbortError') {
+            showNotification('Request timeout. Periksa koneksi internet dan coba lagi.', 'error');
+        } else if (error.message.includes('HTTP 500')) {
+            showNotification('Server error. Restart aplikasi dan coba lagi.', 'error');
+        } else {
+            showNotification(error.message || 'Koneksi gagal. Periksa internet Anda.', 'error');
+        }
     } finally {
         connectBtn.textContent = originalText;
         connectBtn.disabled = false;
+        hideLoading();
     }
 }
 
 function showPairingCode(code, phoneNumber) {
-    const pairingContainer = document.getElementById('qrCodeContainer');
+    const codeContainer = document.getElementById('codeContainer');
+    const pairingCodeDisplay = document.getElementById('pairingCodeDisplay');
     
-    pairingContainer.innerHTML = `
-        <div class="pairing-code-display">
-            <h4>Kode Pairing WhatsApp</h4>
-            <p>Nomor: ${phoneNumber}</p>
-            <div class="pairing-code">${code}</div>
-            <div class="pairing-instructions">
-                <p><strong>Cara menggunakan:</strong></p>
-                <ol>
-                    <li>Buka WhatsApp di ponsel Anda</li>
-                    <li>Pilih "Link a Device" atau "Tautkan Perangkat"</li>
-                    <li>Pilih "Link with Phone Number" atau "Tautkan dengan Nomor"</li>
+    pairingCodeDisplay.textContent = code;
+    codeContainer.classList.remove('hidden');
+    
+    if (!codeContainer.querySelector('.pairing-instructions')) {
+        const instructions = document.createElement('div');
+        instructions.className = 'pairing-instructions';
+        instructions.innerHTML = `
+            <div style="margin-top: 16px; padding: 12px; background: #e8f0fe; border-radius: 8px; font-size: 13px;">
+                <strong>Langkah-langkah:</strong>
+                <ol style="margin: 8px 0 0 20px; padding: 0;">
+                    <li>Buka WhatsApp di HP (${phoneNumber})</li>
+                    <li>Tap menu ⋮ → "Perangkat Tertaut"</li>
+                    <li>Tap "Tautkan Perangkat"</li>
+                    <li>Pilih "Tautkan dengan Nomor Telepon"</li>
                     <li>Masukkan kode: <strong>${code}</strong></li>
                 </ol>
+                <p style="margin: 8px 0 0; color: #d93025;"><strong>Kode berlaku 2 menit</strong></p>
             </div>
-            <button class="btn btn-primary" onclick="hidePairingCode()">Close</button>
-        </div>
-    `;
-    
-    pairingContainer.classList.remove('hidden');
-    
-    if (!document.querySelector('#pairing-styles')) {
-        const styles = document.createElement('style');
-        styles.id = 'pairing-styles';
-        styles.textContent = `
-            .pairing-code-display {
-                text-align: center;
-                padding: 20px;
-                background: white;
-                border-radius: 12px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            }
-            .pairing-code {
-                font-size: 32px;
-                font-weight: bold;
-                color: #1a73e8;
-                background: #f8f9fa;
-                padding: 16px 24px;
-                border-radius: 8px;
-                margin: 16px 0;
-                letter-spacing: 4px;
-                font-family: 'Courier New', monospace;
-            }
-            .pairing-instructions {
-                text-align: left;
-                margin: 20px 0;
-                padding: 16px;
-                background: #e8f0fe;
-                border-radius: 8px;
-            }
-            .pairing-instructions ol {
-                margin: 8px 0 0 20px;
-            }
-            .pairing-instructions li {
-                margin: 4px 0;
-                font-size: 14px;
-            }
         `;
-        document.head.appendChild(styles);
+        codeContainer.appendChild(instructions);
     }
 }
 
 function hidePairingCode() {
-    document.getElementById('qrCodeContainer').classList.add('hidden');
+    const codeContainer = document.getElementById('codeContainer');
+    codeContainer.classList.add('hidden');
+    
+    const instructions = codeContainer.querySelector('.pairing-instructions');
+    if (instructions) {
+        instructions.remove();
+    }
 }
 
 async function checkConnectionStatus() {
     try {
-        const response = await fetch('/api/whatsapp/status');
-        const status = await response.json();
+        const response = await fetch('/api/whatsapp/status', {
+            timeout: 5000
+        });
         
-        const statusIndicator = document.getElementById('connectionStatus');
-        const statusDot = statusIndicator.querySelector('.status-dot');
-        const statusText = statusIndicator.querySelector('span');
-        const connectBtn = document.getElementById('connectBtn');
-        
-        if (status.connected) {
-            statusDot.className = 'status-dot online';
-            statusText.textContent = `Connected (${status.phoneNumber || 'Unknown'})`;
-            connectBtn.textContent = 'Reconnect';
-            connectBtn.classList.remove('btn-primary');
-            connectBtn.classList.add('btn-success');
-            
-            if (status.connected && !document.getElementById('qrCodeContainer').classList.contains('hidden')) {
-                hidePairingCode();
-                showNotification('WhatsApp berhasil terhubung!', 'success');
-            }
-        } else {
-            statusDot.className = 'status-dot offline';
-            statusText.textContent = 'Disconnected';
-            connectBtn.textContent = 'Connect WhatsApp';
-            connectBtn.classList.remove('btn-success');
-            connectBtn.classList.add('btn-primary');
+        if (!response.ok) {
+            throw new Error('Status check failed');
         }
         
-        document.getElementById('sendBtn').disabled = !status.connected;
+        const status = await response.json();
+        updateUI(status);
         
     } catch (error) {
         console.error('Status check error:', error);
+        
+        updateUI({
+            connected: false,
+            error: true,
+            message: 'Cannot connect to server'
+        });
+    }
+}
+
+function updateUI(status) {
+    const statusIndicator = document.getElementById('connectionStatus');
+    const statusDot = statusIndicator.querySelector('.status-dot');
+    const statusText = statusIndicator.querySelector('span');
+    const connectBtn = document.getElementById('connectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    if (status.error) {
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = 'Server Error';
+        connectBtn.textContent = 'Retry Connection';
+        connectBtn.disabled = false;
+        sendBtn.disabled = true;
+        return;
+    }
+    
+    if (status.connected) {
+        statusDot.className = 'status-dot online';
+        statusText.textContent = `Connected${status.phoneNumber ? ` (${status.phoneNumber})` : ''}`;
+        connectBtn.textContent = 'Reconnect';
+        connectBtn.classList.remove('btn-primary');
+        connectBtn.classList.add('btn-success');
+        sendBtn.disabled = false;
+        
+        if (!document.getElementById('codeContainer').classList.contains('hidden')) {
+            hidePairingCode();
+            showNotification('WhatsApp berhasil terhubung!', 'success');
+        }
+    } else if (status.isInitializing) {
+        statusDot.className = 'status-dot connecting';
+        statusText.textContent = 'Connecting...';
+        connectBtn.textContent = 'Connecting...';
+        connectBtn.disabled = true;
+        sendBtn.disabled = true;
+    } else {
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = 'Disconnected';
+        connectBtn.textContent = 'Connect WhatsApp';
+        connectBtn.classList.remove('btn-success');
+        connectBtn.classList.add('btn-primary');
+        connectBtn.disabled = false;
+        sendBtn.disabled = true;
     }
 }
 
 async function sendWhatsAppMessage() {
     const targetNumber = document.getElementById('targetNumber').value.trim();
     const messageVersion = document.getElementById('messageVersion').value;
-    const customMessage = document.getElementById('customMessage').value.trim();
     
     if (!targetNumber) {
         showNotification('Nomor WhatsApp target harus diisi', 'error');
@@ -199,15 +221,22 @@ async function sendWhatsAppMessage() {
         return;
     }
     
+    if (!confirm(`Yakin ingin mengirim bug ${messageVersion.toUpperCase()} ke ${targetNumber}?\n\n⚠️ Gunakan dengan bertanggung jawab!`)) {
+        return;
+    }
+    
     const sendBtn = document.getElementById('sendBtn');
     const originalText = sendBtn.textContent;
     
     try {
-        sendBtn.textContent = 'Sending...';
+        sendBtn.textContent = 'Sending Bugs...';
         sendBtn.disabled = true;
         showLoading();
         
         const user = JSON.parse(localStorage.getItem('nocturne_user') || '{}');
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); 
         
         const response = await fetch('/api/whatsapp/send', {
             method: 'POST',
@@ -217,32 +246,39 @@ async function sendWhatsAppMessage() {
             body: JSON.stringify({
                 target: targetNumber,
                 version: messageVersion,
-                message: customMessage,
+                message: '', 
                 userId: user.username || 'anonymous'
-            })
+            }),
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         
         const result = await response.json();
         
         if (result.success) {
-            showNotification(`Pesan ${messageVersion.toUpperCase()} berhasil dikirim ke ${targetNumber}`, 'success');
+            showNotification(`Bug ${messageVersion.toUpperCase()} berhasil dikirim ke ${targetNumber}`, 'success');
             
             document.getElementById('targetNumber').value = '';
-            document.getElementById('customMessage').value = '';
             
             if (result.nextAvailable) {
                 showRateLimit(result.nextAvailable);
             }
         } else {
-            showNotification(result.message || 'Gagal mengirim pesan', 'error');
-            
-            if (result.nextAvailable) {
-                showRateLimit(result.nextAvailable);
-            }
+            throw new Error(result.message || 'Gagal mengirim pesan');
         }
     } catch (error) {
         console.error('Send message error:', error);
-        showNotification('Koneksi gagal. Periksa internet Anda.', 'error');
+        
+        if (error.name === 'AbortError') {
+            showNotification('Request timeout. Proses memakan waktu terlalu lama.', 'error');
+        } else {
+            showNotification(error.message || 'Gagal mengirim pesan', 'error');
+        }
     } finally {
         sendBtn.textContent = originalText;
         sendBtn.disabled = false;
@@ -265,69 +301,3 @@ function showRateLimit(nextAvailable) {
             rateLimitInfo.classList.add('hidden');
             return;
         }
-        
-        const minutes = Math.floor(diff / 60000);
-        const seconds = Math.floor((diff % 60000) / 1000);
-        
-        countdown.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    };
-    
-    updateCountdown();
-    const interval = setInterval(() => {
-        updateCountdown();
-        
-        const now = new Date();
-        const next = new Date(nextAvailable);
-        if (now >= next) {
-            clearInterval(interval);
-            rateLimitInfo.classList.add('hidden');
-        }
-    }, 1000);
-}
-
-function formatPhoneNumber(event) {
-    let value = event.target.value.replace(/\D/g, '');
-    
-    if (value.startsWith('08')) {
-        value = '62' + value.substring(1);
-    } else if (value.startsWith('8') && value.length > 8) {
-        value = '62' + value;
-    }
-    
-    event.target.value = value;
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    const versionSelect = document.getElementById('messageVersion');
-    
-    if (versionSelect) {
-        versionSelect.addEventListener('change', function() {
-            const version = this.value;
-            const descriptions = {
-                v1: 'Basic: Pesan dengan payment button dan context info standar',
-                v2: 'Advanced: Pesan dengan list response dan copy button untuk crash lebih kuat',
-                v3: 'Premium: Pesan dengan newsletter context dan multiple interactive buttons untuk crash maksimal'
-            };
-            
-            const description = descriptions[version] || descriptions.v1;
-            
-            if (!document.querySelector('.version-help')) {
-                const helpDiv = document.createElement('div');
-                helpDiv.className = 'version-help';
-                helpDiv.style.cssText = `
-                    margin-top: 8px;
-                    padding: 8px 12px;
-                    background: #e8f0fe;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    color: #1a73e8;
-                `;
-                versionSelect.parentNode.appendChild(helpDiv);
-            }
-            
-            document.querySelector('.version-help').textContent = description;
-        });
-        
-        versionSelect.dispatchEvent(new Event('change'));
-    }
-});

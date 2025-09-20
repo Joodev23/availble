@@ -186,7 +186,7 @@ function displayNGLResults(results, username) {
         
         <div class="results-footer">
             <button class="btn btn-secondary" onclick="clearNGLResults()">Clear Results</button>
-            <small class="disclaimer">⚠️ Gunakan fitur ini dengan bijak dan bertanggung jawab. Spam berlebihan dapat melanggar Terms of Service NGL.</small>
+            <small class="disclaimer">Gunakan fitur ini dengan bijak dan bertanggung jawab. Spam berlebihan dapat melanggar Terms of Service NGL.</small>
         </div>
     `;
     
