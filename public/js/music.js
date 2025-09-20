@@ -1,4 +1,34 @@
 document.addEventListener('DOMContentLoaded', function() {
+  const audioElements = document.querySelectorAll('audio');
+  
+  audioElements.forEach(audio => {
+    // Tambahkan loading state
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'audio-loading';
+    loadingDiv.innerHTML = 'Loading...';
+    audio.parentNode.insertBefore(loadingDiv, audio);
+    
+    // Ketika audio siap diputar
+    audio.addEventListener('loadeddata', () => {
+      loadingDiv.style.display = 'none';
+      audio.style.display = 'block';
+    });
+    
+    // Jika terjadi error
+    audio.addEventListener('error', (e) => {
+      console.error('Error loading audio:', e);
+      loadingDiv.innerHTML = 'Error loading audio. Please try again.';
+      loadingDiv.classList.add('audio-error');
+    });
+    
+    // Tambahkan controls jika belum ada
+    if (!audio.hasAttribute('controls')) {
+      audio.controls = true;
+    }
+  });
+});
+
+document.addEventListener('DOMContentLoaded', function() {
     initializeMusicPlayer();
 });
 
