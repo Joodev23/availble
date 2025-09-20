@@ -190,5 +190,5 @@ cron.schedule('0 * * * *', () => {
 app.listen(PORT, () => {
     console.log(`Nocturne Executor running on port ${PORT}`);
     console.log('Starting WhatsApp service...');
-    whatsappService.initialize();
+    console.log('WhatsApp service ready. Use /api/whatsapp/connect to start.');
 });
