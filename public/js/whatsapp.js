@@ -8,9 +8,6 @@ function initializeWhatsApp() {
     const connectBtn = document.getElementById('connectBtn');
     const sendBtn = document.getElementById('sendBtn');
     
-    connectBtn.removeEventListener('click', requestPairingCode);
-    sendBtn.removeEventListener('click', sendWhatsAppMessage);
-    
     connectBtn.addEventListener('click', requestPairingCode);
     sendBtn.addEventListener('click', sendWhatsAppMessage);
     
@@ -19,28 +16,15 @@ function initializeWhatsApp() {
 }
 
 async function requestPairingCode() {
- 
-    let phoneNumber = prompt('Masukkan nomor WhatsApp Anda (contoh: 628123456789 atau 08123456789):');
+    const phoneNumber = prompt('Masukkan nomor WhatsApp Anda untuk pairing (contoh: 628123456789):');
     
     if (!phoneNumber) {
         return;
     }
     
-    let cleanNumber = phoneNumber.replace(/\D/g, '');
-    
-    if (cleanNumber.startsWith('08')) {
-        cleanNumber = '62' + cleanNumber.substring(1);
-    } else if (cleanNumber.startsWith('8') && cleanNumber.length >= 9) {
-        cleanNumber = '62' + cleanNumber;
-    }
-    
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
     if (cleanNumber.length < 10 || cleanNumber.length > 15) {
-        showNotification('Format nomor tidak valid. Gunakan format: 628123456789', 'error');
-        return;
-    }
-    
-    if (!cleanNumber.startsWith('62')) {
-        showNotification('Nomor harus diawali dengan 62 (kode negara Indonesia)', 'error');
+        showNotification('Format nomor telepon tidak valid', 'error');
         return;
     }
     
@@ -50,53 +34,29 @@ async function requestPairingCode() {
     try {
         connectBtn.textContent = 'Generating Code...';
         connectBtn.disabled = true;
-        showLoading();
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);  
         
         const response = await fetch('/api/whatsapp/connect', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ phoneNumber: cleanNumber }),
-            signal: controller.signal
+            body: JSON.stringify({ phoneNumber: cleanNumber })
         });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
         
         const result = await response.json();
         
-        if (result.success && result.pairingCode) {
+        if (result.success) {
             showPairingCode(result.pairingCode, cleanNumber);
-            showNotification('Kode pairing berhasil dibuat! Masukkan kode ke WhatsApp Anda dalam 2 menit.', 'success');
-            
-            setTimeout(() => {
-                hidePairingCode();
-                showNotification('Kode pairing expired. Request kode baru jika diperlukan.', 'warning');
-            }, 120000);
+            showNotification('Kode pairing berhasil dibuat! Masukkan kode ke WhatsApp Anda.', 'success');
         } else {
-            throw new Error(result.message || 'Gagal membuat kode pairing');
+            showNotification(result.message || 'Gagal membuat kode pairing', 'error');
         }
     } catch (error) {
         console.error('Pairing code error:', error);
-        
-        if (error.name === 'AbortError') {
-            showNotification('Request timeout. Periksa koneksi internet dan coba lagi.', 'error');
-        } else if (error.message.includes('HTTP 500')) {
-            showNotification('Server error. Restart aplikasi dan coba lagi.', 'error');
-        } else {
-            showNotification(error.message || 'Koneksi gagal. Periksa internet Anda.', 'error');
-        }
+        showNotification('Koneksi gagal. Periksa internet Anda.', 'error');
     } finally {
         connectBtn.textContent = originalText;
         connectBtn.disabled = false;
-        hideLoading();
     }
 }
 
@@ -106,103 +66,46 @@ function showPairingCode(code, phoneNumber) {
     
     pairingCodeDisplay.textContent = code;
     codeContainer.classList.remove('hidden');
-    
-    if (!codeContainer.querySelector('.pairing-instructions')) {
-        const instructions = document.createElement('div');
-        instructions.className = 'pairing-instructions';
-        instructions.innerHTML = `
-            <div style="margin-top: 16px; padding: 12px; background: #e8f0fe; border-radius: 8px; font-size: 13px;">
-                <strong>Langkah-langkah:</strong>
-                <ol style="margin: 8px 0 0 20px; padding: 0;">
-                    <li>Buka WhatsApp di HP (${phoneNumber})</li>
-                    <li>Tap menu ⋮ → "Perangkat Tertaut"</li>
-                    <li>Tap "Tautkan Perangkat"</li>
-                    <li>Pilih "Tautkan dengan Nomor Telepon"</li>
-                    <li>Masukkan kode: <strong>${code}</strong></li>
-                </ol>
-                <p style="margin: 8px 0 0; color: #d93025;"><strong>Kode berlaku 2 menit</strong></p>
-            </div>
-        `;
-        codeContainer.appendChild(instructions);
-    }
 }
 
 function hidePairingCode() {
     const codeContainer = document.getElementById('codeContainer');
     codeContainer.classList.add('hidden');
-    
-    const instructions = codeContainer.querySelector('.pairing-instructions');
-    if (instructions) {
-        instructions.remove();
-    }
 }
 
 async function checkConnectionStatus() {
     try {
-        const response = await fetch('/api/whatsapp/status', {
-            timeout: 5000
-        });
+        const response = await fetch('/api/whatsapp/status');
+        const status = await response.json();
         
-        if (!response.ok) {
-            throw new Error('Status check failed');
+        const statusIndicator = document.getElementById('connectionStatus');
+        const statusDot = statusIndicator.querySelector('.status-dot');
+        const statusText = statusIndicator.querySelector('span');
+        const connectBtn = document.getElementById('connectBtn');
+        
+        if (status.connected) {
+            statusDot.className = 'status-dot online';
+            statusText.textContent = `Connected (${status.phoneNumber || 'Unknown'})`;
+            connectBtn.textContent = 'Reconnect';
+            connectBtn.classList.remove('btn-primary');
+            connectBtn.classList.add('btn-success');
+            
+            if (status.connected && !document.getElementById('codeContainer').classList.contains('hidden')) {
+                hidePairingCode();
+                showNotification('WhatsApp berhasil terhubung!', 'success');
+            }
+        } else {
+            statusDot.className = 'status-dot offline';
+            statusText.textContent = 'Disconnected';
+            connectBtn.textContent = 'Connect WhatsApp';
+            connectBtn.classList.remove('btn-success');
+            connectBtn.classList.add('btn-primary');
         }
         
-        const status = await response.json();
-        updateUI(status);
+        document.getElementById('sendBtn').disabled = !status.connected;
         
     } catch (error) {
         console.error('Status check error:', error);
-        
-        updateUI({
-            connected: false,
-            error: true,
-            message: 'Cannot connect to server'
-        });
-    }
-}
-
-function updateUI(status) {
-    const statusIndicator = document.getElementById('connectionStatus');
-    const statusDot = statusIndicator.querySelector('.status-dot');
-    const statusText = statusIndicator.querySelector('span');
-    const connectBtn = document.getElementById('connectBtn');
-    const sendBtn = document.getElementById('sendBtn');
-    
-    if (status.error) {
-        statusDot.className = 'status-dot offline';
-        statusText.textContent = 'Server Error';
-        connectBtn.textContent = 'Retry Connection';
-        connectBtn.disabled = false;
-        sendBtn.disabled = true;
-        return;
-    }
-    
-    if (status.connected) {
-        statusDot.className = 'status-dot online';
-        statusText.textContent = `Connected${status.phoneNumber ? ` (${status.phoneNumber})` : ''}`;
-        connectBtn.textContent = 'Reconnect';
-        connectBtn.classList.remove('btn-primary');
-        connectBtn.classList.add('btn-success');
-        sendBtn.disabled = false;
-        
-        if (!document.getElementById('codeContainer').classList.contains('hidden')) {
-            hidePairingCode();
-            showNotification('WhatsApp berhasil terhubung!', 'success');
-        }
-    } else if (status.isInitializing) {
-        statusDot.className = 'status-dot connecting';
-        statusText.textContent = 'Connecting...';
-        connectBtn.textContent = 'Connecting...';
-        connectBtn.disabled = true;
-        sendBtn.disabled = true;
-    } else {
-        statusDot.className = 'status-dot offline';
-        statusText.textContent = 'Disconnected';
-        connectBtn.textContent = 'Connect WhatsApp';
-        connectBtn.classList.remove('btn-success');
-        connectBtn.classList.add('btn-primary');
-        connectBtn.disabled = false;
-        sendBtn.disabled = true;
     }
 }
 
@@ -221,22 +124,15 @@ async function sendWhatsAppMessage() {
         return;
     }
     
-    if (!confirm(`Yakin ingin mengirim bug ${messageVersion.toUpperCase()} ke ${targetNumber}?\n\n⚠️ Gunakan dengan bertanggung jawab!`)) {
-        return;
-    }
-    
     const sendBtn = document.getElementById('sendBtn');
     const originalText = sendBtn.textContent;
     
     try {
-        sendBtn.textContent = 'Sending Bugs...';
+        sendBtn.textContent = 'Sending...';
         sendBtn.disabled = true;
         showLoading();
         
         const user = JSON.parse(localStorage.getItem('nocturne_user') || '{}');
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); 
         
         const response = await fetch('/api/whatsapp/send', {
             method: 'POST',
@@ -246,22 +142,15 @@ async function sendWhatsAppMessage() {
             body: JSON.stringify({
                 target: targetNumber,
                 version: messageVersion,
-                message: '', 
+                message: '',
                 userId: user.username || 'anonymous'
-            }),
-            signal: controller.signal
+            })
         });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
         
         const result = await response.json();
         
         if (result.success) {
-            showNotification(`Bug ${messageVersion.toUpperCase()} berhasil dikirim ke ${targetNumber}`, 'success');
+            showNotification(`Pesan ${messageVersion.toUpperCase()} berhasil dikirim ke ${targetNumber}`, 'success');
             
             document.getElementById('targetNumber').value = '';
             
@@ -269,16 +158,15 @@ async function sendWhatsAppMessage() {
                 showRateLimit(result.nextAvailable);
             }
         } else {
-            throw new Error(result.message || 'Gagal mengirim pesan');
+            showNotification(result.message || 'Gagal mengirim pesan', 'error');
+            
+            if (result.nextAvailable) {
+                showRateLimit(result.nextAvailable);
+            }
         }
     } catch (error) {
         console.error('Send message error:', error);
-        
-        if (error.name === 'AbortError') {
-            showNotification('Request timeout. Proses memakan waktu terlalu lama.', 'error');
-        } else {
-            showNotification(error.message || 'Gagal mengirim pesan', 'error');
-        }
+        showNotification('Koneksi gagal. Periksa internet Anda.', 'error');
     } finally {
         sendBtn.textContent = originalText;
         sendBtn.disabled = false;
@@ -301,3 +189,69 @@ function showRateLimit(nextAvailable) {
             rateLimitInfo.classList.add('hidden');
             return;
         }
+        
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        
+        countdown.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+    
+    updateCountdown();
+    const interval = setInterval(() => {
+        updateCountdown();
+        
+        const now = new Date();
+        const next = new Date(nextAvailable);
+        if (now >= next) {
+            clearInterval(interval);
+            rateLimitInfo.classList.add('hidden');
+        }
+    }, 1000);
+}
+
+function formatPhoneNumber(event) {
+    let value = event.target.value.replace(/\D/g, '');
+    
+    if (value.startsWith('08')) {
+        value = '62' + value.substring(1);
+    } else if (value.startsWith('8') && value.length > 8) {
+        value = '62' + value;
+    }
+    
+    event.target.value = value;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const versionSelect = document.getElementById('messageVersion');
+    
+    if (versionSelect) {
+        versionSelect.addEventListener('change', function() {
+            const version = this.value;
+            const descriptions = {
+                v1: 'Force Close App - Crash No Click',
+                v2: 'Delay Maker - Delay Invisble',
+                v3: 'Freeze Home - Freeze Target'
+            };
+            
+            const description = descriptions[version] || descriptions.v1;
+            
+            if (!document.querySelector('.version-help')) {
+                const helpDiv = document.createElement('div');
+                helpDiv.className = 'version-help';
+                helpDiv.style.cssText = `
+                    margin-top: 8px;
+                    padding: 8px 12px;
+                    background: #e8f0fe;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    color: #1a73e8;
+                `;
+                versionSelect.parentNode.appendChild(helpDiv);
+            }
+            
+            document.querySelector('.version-help').textContent = description;
+        });
+        
+        versionSelect.dispatchEvent(new Event('change'));
+    }
+});
